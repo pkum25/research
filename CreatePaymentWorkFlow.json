@@ -1,0 +1,661 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "azuretables_1_Connection_Name": {
+      "type": "string",
+      "defaultValue": "azuretables-1"
+    },
+    "azuretables_1_Connection_DisplayName": {
+      "type": "string",
+      "defaultValue": "UAETableStorageAccount"
+    },
+    "azuretables_1_storageaccount": {
+      "type": "string",
+      "metadata": {
+        "description": "The name of your storage account"
+      },
+      "defaultValue": "uaecdev01storageaccount"
+    },
+    "azuretables_1_sharedkey": {
+      "type": "securestring",
+      "metadata": {
+        "description": "The shared storage key of your storage account"
+      }
+    },
+    "servicebus_1_Connection_Name": {
+      "type": "string",
+      "defaultValue": "servicebus-3"
+    },
+    "servicebus_1_Connection_DisplayName": {
+      "type": "string",
+      "defaultValue": "SBConnect"
+    },
+    "servicebus_1_connectionString": {
+      "type": "securestring",
+      "metadata": {
+        "description": "Azure Service Bus Connection String"
+      }
+    },
+    "azureblob_1_Connection_Name": {
+      "type": "string",
+      "defaultValue": "azureblob-2"
+    },
+    "azureblob_1_Connection_DisplayName": {
+      "type": "string",
+      "defaultValue": "TreasLandingZone"
+    },
+    "azureblob_1_accountName": {
+      "type": "string",
+      "metadata": {
+        "description": "Name of the storage account the connector should use."
+      },
+      "defaultValue": "uaedev01datalandingzone"
+    },
+    "azureblob_1_accessKey": {
+      "type": "securestring",
+      "metadata": {
+        "description": "Specify a valid primary/secondary storage account access key."
+      }
+    },
+    "LogicAppLocation": {
+      "type": "string",
+      "minLength": 1,
+      "allowedValues": [
+        "[resourceGroup().location]",
+        "eastasia",
+        "southeastasia",
+        "centralus",
+        "eastus",
+        "eastus2",
+        "westus",
+        "northcentralus",
+        "southcentralus",
+        "northeurope",
+        "westeurope",
+        "japanwest",
+        "japaneast",
+        "brazilsouth",
+        "australiaeast",
+        "australiasoutheast",
+        "southindia",
+        "centralindia",
+        "westindia",
+        "canadacentral",
+        "canadaeast",
+        "uksouth",
+        "ukwest",
+        "westcentralus",
+        "westus2"
+      ],
+      "defaultValue": "ukwest"
+    },
+    "LogicAppName": {
+      "type": "string",
+      "minLength": 1,
+      "defaultValue": "UAEC-DEV01-TreasuryPaymentWorkflow"
+    }
+  },
+  "variables": {},
+  "resources": [
+    {
+      "properties": {
+        "state": "Enabled",
+        "definition": {
+          "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+          "actions": {
+            "Add_Entity_Data_with_CorrelationId": {
+              "type": "ApiConnection",
+              "inputs": {
+                "host": {
+                  "connection": {
+                    "name": "@parameters('$connections')['azuretables_1']['connectionId']"
+                  }
+                },
+                "method": "post",
+                "body": {
+                  "EndDateTimeStamp": "@utcNow()",
+                  "PartitionKey": "TransactionWorkFlow",
+                  "RowKey": "@{variables('MessageId')}",
+                  "RunId": "@variables('CorrelationId')"
+                },
+                "path": "/Tables/@{encodeURIComponent('PaymentWorkflow')}/entities"
+              },
+              "runAfter": {
+                "Unlock_and_Complete_the_message_in_a_queue": [
+                  "Succeeded"
+                ]
+              }
+            },
+            "Convert_JSON_Message_to_XML_for_TAS": {
+              "type": "Function",
+              "inputs": {
+                "body": "@body('Validate_Payment_Instruction_Message')",
+                "function": {
+                  "id": "/subscriptions/8e41313b-b6ad-4c00-b793-84d1e7960013/resourceGroups/dev-int/providers/Microsoft.Web/sites/UAEC-DEV01-FA-Journey4/functions/ConvertXmltoJson"
+                }
+              },
+              "runAfter": {
+                "Initialize_variable": [
+                  "Succeeded"
+                ]
+              }
+            },
+            "Initialize_CorrelationId": {
+              "type": "InitializeVariable",
+              "inputs": {
+                "variables": [
+                  {
+                    "name": "CorrelationId",
+                    "type": "String",
+                    "value": "@{guid()}"
+                  }
+                ]
+              },
+              "runAfter": {}
+            },
+            "Initialize_variable": {
+              "type": "InitializeVariable",
+              "inputs": {
+                "variables": [
+                  {
+                    "name": "MessageId",
+                    "type": "String",
+                    "value": "@body('Validate_Payment_Instruction_Message')?['Document']?['CstmrCdtTrfInitn']?['GrpHdr']?['MsgId']"
+                  }
+                ]
+              },
+              "runAfter": {
+                "Validate_Payment_Instruction_Message": [
+                  "Succeeded"
+                ]
+              }
+            },
+            "Send_JSON_Message_to_TAS_InBound_Queue": {
+              "type": "ApiConnection",
+              "inputs": {
+                "host": {
+                  "connection": {
+                    "name": "@parameters('$connections')['servicebus_2']['connectionId']"
+                  }
+                },
+                "method": "post",
+                "body": {
+                  "ContentData": "@{base64(body('Convert_JSON_Message_to_XML_for_TAS'))}",
+                  "ContentType": "@triggerBody()?['ContentType']"
+                },
+                "path": "/@{encodeURIComponent(encodeURIComponent('tas-inbound'))}/messages",
+                "queries": {
+                  "systemProperties": "None"
+                }
+              },
+              "runAfter": {
+                "Convert_JSON_Message_to_XML_for_TAS": [
+                  "Succeeded"
+                ]
+              }
+            },
+            "Send_message_to_input-error_queue": {
+              "type": "ApiConnection",
+              "inputs": {
+                "host": {
+                  "connection": {
+                    "name": "@parameters('$connections')['servicebus_2']['connectionId']"
+                  }
+                },
+                "method": "post",
+                "body": {
+                  "SessionId": "@variables('CorrelationId')",
+                  "ContentData": "@{triggerBody()?['ContentData']}",
+                  "ContentType": "@triggerBody()?['ContentType']"
+                },
+                "path": "/@{encodeURIComponent(encodeURIComponent('payment-input-error'))}/messages",
+                "queries": {
+                  "systemProperties": "None"
+                }
+              },
+              "runAfter": {
+                "Tap_Message_to_Landing_Zone": [
+                  "Succeeded"
+                ]
+              }
+            },
+            "Tap_Message_to_Landing_Zone": {
+              "type": "ApiConnection",
+              "inputs": {
+                "host": {
+                  "connection": {
+                    "name": "@parameters('$connections')['azureblob']['connectionId']"
+                  }
+                },
+                "method": "post",
+                "body": "@base64ToBinary(triggerBody()?['ContentData'])",
+                "path": "/datasets/default/files",
+                "queries": {
+                  "folderPath": "/treasuryworkflow",
+                  "name": "@{concat('Payment_',formatDateTime(utcNow(),'yyyyMMdd_HH_mm_ss'),'.json')}",
+                  "queryParametersSingleEncoded": true
+                }
+              },
+              "runAfter": {
+                "Send_JSON_Message_to_TAS_InBound_Queue": [
+                  "Succeeded"
+                ]
+              },
+              "runtimeConfiguration": {
+                "contentTransfer": {
+                  "transferMode": "Chunked"
+                }
+              }
+            },
+            "Unlock_and_Complete_the_message_in_a_queue": {
+              "type": "ApiConnection",
+              "inputs": {
+                "host": {
+                  "connection": {
+                    "name": "@parameters('$connections')['servicebus_2']['connectionId']"
+                  }
+                },
+                "method": "delete",
+                "path": "/@{encodeURIComponent(encodeURIComponent('payment-input'))}/messages/complete",
+                "queries": {
+                  "lockToken": "@triggerBody()?['LockToken']",
+                  "queueType": "Main"
+                }
+              },
+              "runAfter": {
+                "Tap_Message_to_Landing_Zone": [
+                  "Succeeded"
+                ]
+              }
+            },
+            "Validate_Payment_Instruction_Message": {
+              "type": "ParseJson",
+              "inputs": {
+                "content": "@{decodeBase64(triggerBody()?['ContentData'])}",
+                "schema": {
+                  "properties": {
+                    "?xml": {
+                      "properties": {
+                        "@@encoding": {
+                          "type": "string"
+                        },
+                        "@@version": {
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "Document": {
+                      "properties": {
+                        "@@xmlns": {
+                          "type": "string"
+                        },
+                        "@@xmlns:xsi": {
+                          "type": "string"
+                        },
+                        "@@xsi:schemaLocation": {
+                          "type": "string"
+                        },
+                        "CstmrCdtTrfInitn": {
+                          "properties": {
+                            "GrpHdr": {
+                              "properties": {
+                                "CreDtTm": {
+                                  "type": "string"
+                                },
+                                "CtrlSum": {
+                                  "type": "string"
+                                },
+                                "InitgPty": {
+                                  "properties": {
+                                    "Nm": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "type": "object"
+                                },
+                                "MsgId": {
+                                  "type": "string"
+                                },
+                                "NbOfTxs": {
+                                  "type": "string"
+                                }
+                              },
+                              "type": "object"
+                            },
+                            "PmtInf": {
+                              "properties": {
+                                "BtchBookg": {
+                                  "type": "string"
+                                },
+                                "CdtTrfTxInf": {
+                                  "items": {
+                                    "properties": {
+                                      "Amt": {
+                                        "properties": {
+                                          "InstdAmt": {
+                                            "properties": {
+                                              "#text": {
+                                                "type": "string"
+                                              },
+                                              "@@Ccy": {
+                                                "type": "string"
+                                              }
+                                            },
+                                            "type": "object"
+                                          }
+                                        },
+                                        "type": "object"
+                                      },
+                                      "Cdtr": {
+                                        "properties": {
+                                          "Nm": {
+                                            "type": "string"
+                                          },
+                                          "PstlAdr": {
+                                            "properties": {
+                                              "AdrLine": {
+                                                "type": "string"
+                                              },
+                                              "Ctry": {
+                                                "type": "string"
+                                              }
+                                            },
+                                            "type": "object"
+                                          }
+                                        },
+                                        "type": "object"
+                                      },
+                                      "CdtrAcct": {
+                                        "properties": {
+                                          "Id": {
+                                            "properties": {
+                                              "IBAN": {
+                                                "type": "string"
+                                              }
+                                            },
+                                            "type": "object"
+                                          }
+                                        },
+                                        "type": "object"
+                                      },
+                                      "CdtrAgt": {
+                                        "properties": {
+                                          "FinInstnId": {
+                                            "properties": {
+                                              "BIC": {
+                                                "type": "string"
+                                              },
+                                              "Nm": {
+                                                "type": "string"
+                                              },
+                                              "PstlAdr": {
+                                                "properties": {
+                                                  "AdrLine": {
+                                                    "type": "string"
+                                                  },
+                                                  "Ctry": {
+                                                    "type": "string"
+                                                  }
+                                                },
+                                                "type": "object"
+                                              }
+                                            },
+                                            "type": "object"
+                                          }
+                                        },
+                                        "type": "object"
+                                      },
+                                      "PmtId": {
+                                        "properties": {
+                                          "EndToEndId": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "type": "object"
+                                      },
+                                      "RmtInf": {
+                                        "properties": {
+                                          "Strd": {
+                                            "properties": {
+                                              "RfrdDocInf": {
+                                                "properties": {
+                                                  "Nb": {
+                                                    "type": "string"
+                                                  },
+                                                  "Tp": {
+                                                    "properties": {
+                                                      "CdOrPrtry": {
+                                                        "properties": {
+                                                          "Cd": {
+                                                            "type": "string"
+                                                          }
+                                                        },
+                                                        "type": "object"
+                                                      }
+                                                    },
+                                                    "type": "object"
+                                                  }
+                                                },
+                                                "type": "object"
+                                              }
+                                            },
+                                            "type": "object"
+                                          }
+                                        },
+                                        "type": "object"
+                                      }
+                                    },
+                                    "required": [
+                                      "PmtId",
+                                      "Amt",
+                                      "CdtrAgt",
+                                      "Cdtr",
+                                      "CdtrAcct",
+                                      "RmtInf"
+                                    ],
+                                    "type": "object"
+                                  },
+                                  "type": "array"
+                                },
+                                "CtrlSum": {
+                                  "type": "string"
+                                },
+                                "Dbtr": {
+                                  "properties": {
+                                    "Nm": {
+                                      "type": "string"
+                                    },
+                                    "PstlAdr": {
+                                      "properties": {
+                                        "AdrLine": {
+                                          "type": "string"
+                                        },
+                                        "Ctry": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "type": "object"
+                                    }
+                                  },
+                                  "type": "object"
+                                },
+                                "DbtrAcct": {
+                                  "properties": {
+                                    "Id": {
+                                      "properties": {
+                                        "Othr": {
+                                          "properties": {
+                                            "Id": {
+                                              "type": "string"
+                                            }
+                                          },
+                                          "type": "object"
+                                        }
+                                      },
+                                      "type": "object"
+                                    }
+                                  },
+                                  "type": "object"
+                                },
+                                "DbtrAgt": {
+                                  "properties": {
+                                    "FinInstnId": {
+                                      "properties": {
+                                        "BIC": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "type": "object"
+                                    }
+                                  },
+                                  "type": "object"
+                                },
+                                "NbOfTxs": {
+                                  "type": "string"
+                                },
+                                "PmtInfId": {
+                                  "type": "string"
+                                },
+                                "PmtMtd": {
+                                  "type": "string"
+                                },
+                                "ReqdExctnDt": {
+                                  "type": "string"
+                                }
+                              },
+                              "type": "object"
+                            }
+                          },
+                          "type": "object"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  },
+                  "type": "object"
+                }
+              },
+              "runAfter": {
+                "Initialize_CorrelationId": [
+                  "Succeeded"
+                ]
+              }
+            }
+          },
+          "parameters": {
+            "$connections": {
+              "defaultValue": {},
+              "type": "Object"
+            }
+          },
+          "triggers": {
+            "When_a_message_is_received_in_a_queue_(peek-lock)": {
+              "type": "ApiConnection",
+              "inputs": {
+                "host": {
+                  "connection": {
+                    "name": "@parameters('$connections')['servicebus_2']['connectionId']"
+                  }
+                },
+                "method": "get",
+                "path": "/@{encodeURIComponent(encodeURIComponent('payment-input'))}/messages/head/peek",
+                "queries": {
+                  "queueType": "Main"
+                }
+              },
+              "recurrence": {
+                "frequency": "Second",
+                "interval": 30
+              }
+            }
+          },
+          "contentVersion": "1.0.0.0",
+          "outputs": {}
+        },
+        "parameters": {
+          "$connections": {
+            "value": {
+              "azuretables_1": {
+                "id": "[concat(subscription().id, '/providers/Microsoft.Web/locations/', parameters('LogicAppLocation'), '/managedApis/', 'azuretables')]",
+                "connectionId": "[resourceId('Microsoft.Web/connections', parameters('azuretables_1_Connection_Name'))]",
+                "connectionName": "[parameters('azuretables_1_Connection_Name')]"
+              },
+              "servicebus_2": {
+                "id": "[concat(subscription().id, '/providers/Microsoft.Web/locations/', parameters('LogicAppLocation'), '/managedApis/', 'servicebus')]",
+                "connectionId": "[resourceId('Microsoft.Web/connections', parameters('servicebus_1_Connection_Name'))]",
+                "connectionName": "[parameters('servicebus_1_Connection_Name')]"
+              },
+              "azureblob": {
+                "id": "[concat(subscription().id, '/providers/Microsoft.Web/locations/', parameters('LogicAppLocation'), '/managedApis/', 'azureblob')]",
+                "connectionId": "[resourceId('Microsoft.Web/connections', parameters('azureblob_1_Connection_Name'))]",
+                "connectionName": "[parameters('azureblob_1_Connection_Name')]"
+              }
+            }
+          }
+        }
+      },
+      "name": "[parameters('LogicAppName')]",
+      "type": "Microsoft.Logic/workflows",
+      "location": "[parameters('LogicAppLocation')]",
+      "tags": {
+        "displayName": "LogicApp"
+      },
+      "apiVersion": "2016-06-01",
+      "dependsOn": [
+        "[resourceId('Microsoft.Web/connections', parameters('azuretables_1_Connection_Name'))]",
+        "[resourceId('Microsoft.Web/connections', parameters('servicebus_1_Connection_Name'))]",
+        "[resourceId('Microsoft.Web/connections', parameters('azureblob_1_Connection_Name'))]"
+      ]
+    },
+    {
+      "type": "MICROSOFT.WEB/CONNECTIONS",
+      "apiVersion": "2016-06-01",
+      "name": "[parameters('azuretables_1_Connection_Name')]",
+      "location": "ukwest",
+      "properties": {
+        "api": {
+          "id": "[concat(subscription().id, '/providers/Microsoft.Web/locations/', 'ukwest', '/managedApis/', 'azuretables')]"
+        },
+        "displayName": "[parameters('azuretables_1_Connection_DisplayName')]",
+        "parameterValues": {
+          "storageaccount": "[parameters('azuretables_1_storageaccount')]",
+          "sharedkey": "[parameters('azuretables_1_sharedkey')]"
+        }
+      }
+    },
+    {
+      "type": "MICROSOFT.WEB/CONNECTIONS",
+      "apiVersion": "2016-06-01",
+      "name": "[parameters('servicebus_1_Connection_Name')]",
+      "location": "ukwest",
+      "properties": {
+        "api": {
+          "id": "[concat(subscription().id, '/providers/Microsoft.Web/locations/', 'ukwest', '/managedApis/', 'servicebus')]"
+        },
+        "displayName": "[parameters('servicebus_1_Connection_DisplayName')]",
+        "parameterValues": {
+          "connectionString": "[parameters('servicebus_1_connectionString')]"
+        }
+      }
+    },
+    {
+      "type": "MICROSOFT.WEB/CONNECTIONS",
+      "apiVersion": "2016-06-01",
+      "name": "[parameters('azureblob_1_Connection_Name')]",
+      "location": "ukwest",
+      "properties": {
+        "api": {
+          "id": "[concat(subscription().id, '/providers/Microsoft.Web/locations/', 'ukwest', '/managedApis/', 'azureblob')]"
+        },
+        "displayName": "[parameters('azureblob_1_Connection_DisplayName')]",
+        "parameterValues": {
+          "accountName": "[parameters('azureblob_1_accountName')]",
+          "accessKey": "[parameters('azureblob_1_accessKey')]"
+        }
+      }
+    }
+  ],
+  "outputs": {}
+}

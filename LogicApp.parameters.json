@@ -1,0 +1,45 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {   
+    "servicebus_1_Connection_Name": {
+      "value": "connect_sb_journey4"
+    },
+    "servicebus_1_Connection_DisplayName": {
+      "value": "Journey4ServiceBus"
+    },
+    "servicebus_1_connectionString": {
+      "value": "Endpoint=sb://uaec-dev01-servicebus.servicebus.windows.net/;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=zuoL+a4owmwykRQxpmcew/5yNmJmh0VYvoyiQoTsrWw="
+    },
+    "azuretables_1_Connection_Name": {
+      "value": "connect_at_journey4"
+    },
+    "azuretables_1_Connection_DisplayName": {
+      "value": "UAETableStorageAccount"
+    },
+    "azuretables_1_storageaccount": {
+      "value": "uaecdev01storageaccount"
+    },
+    "azuretables_1_sharedkey": {
+      "value": "jFQMgyvbfnqCIo4yRKaPoYqccO70UdTIRJvuOFdITFyLQynQysWvrM/7Ynohz7nfyYnxCu5ZDE1IKNMK8YJDwQ=="
+    },
+    "azureblob_1_Connection_Name": {
+      "value": "connect_ab_journey4"
+    },
+    "azureblob_1_Connection_DisplayName": {
+      "value": "TreasLandingZone"
+    },
+    "azureblob_1_accountName": {
+      "value": "uaedev01datalandingzone"
+    },
+    "azureblob_1_accessKey": {
+      "value": "hu6DFzBVrnsc9uc7rROcvwJL4kY/Bk58JOxO6WGtVl5IXRHZaGL2u7399Eo67c0vCbT16MfOrR6R3Kv41yBVcg=="
+    },
+    "LogicAppLocation": {
+      "value": "ukwest"
+    },
+    "LogicAppName": {
+      "value": "UAEC-DEV01-TreasuryPaymentWorkflow"
+    }
+  }
+}
